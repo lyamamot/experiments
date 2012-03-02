@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+.board {
+	background: #c0c0c0;
+	line-height: 0;
+	border-top: 2px solid #6e6e6e;
+	border-right: 2px solid #fdfdfd;
+	border-bottom: 2px solid #fdfdfd;
+	border-left: 2px solid #6e6e6e;
+	cursor: default;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.tile {
+	position: relative;
+	width: 16px;
+	height: 16px;
+	border-top: 2px solid #fdfdfd;
+	border-right: 2px solid #6e6e6e;
+	border-bottom: 2px solid #6e6e6e;
+	border-left: 2px solid #fdfdfd;
+	background: #c0c0c0;
+	display: inline-block;
+	padding: 0;
+	margin: 0;
+	
+	transition: box-shadow 0.5s;
+	-webkit-transition: box-shadow 0.5s;
+}
+
+.hover {
+	background: #aaa;
+}
+
+.depressed {
+	border-width: 1px 0 0 1px;
+	border-style: solid;
+	border-color: #6e6e6e;
+	width: 19px;
+	height: 19px;
+}
+
+.number, .icon {
+	top: 50%;
+	position: absolute;
+	font-family: Arial Black, sans-serif;
+	font-weight: bold;
+	text-align: center;
+	width: 100%;
+}
+
+.icon {
+	top: 9%;
+}
+
+.misflagged {
+	font-weight: normal;
+	color: #f00;
+}
+
+.mined {
+	background: #f00;
+}
+
+.cheat {
+	box-shadow: inset 0 0 3px 1px #f00;
+}
+
+.one { color: blue; }
+.two { color: green; }
+.three { color: red; }
+.four { color: #000080; }
+.five { color: #800050; }
+.six { color: #408080; }
+.seven { color: black; }
+.eight { color: gray; }
+
+/* -------------------------------------------------------------------- */
+
+body {
+	color: #141D14;
+	background: #98A942;
+	font-family: sans-serif;
+}
+
+#container {
+	margin: 0 auto;
+	border: 0;
+	padding: 0;
+	min-height: 100%;
+}
+
+#main {
+	width: 100%;
+	float: left;
+	padding: 0;
+	margin: 0;
+}
+
+#controls {
+	width: 275px;
+	max-width: 275px;
+	float: left;
+	border: 0;
+	padding: 15px;
+	padding-right: 0;
+	margin: 0;
+}
+
+#settings {
+	padding: 0 0.5em 1em 0.5em;
+}
+
+#settings label {
+	margin-left: 0.5em;
+	position: relative;
+	top: -0.4em;
+}
+
+#settings .slider_value {
+	display: inline;
+	position: relative;
+	top: -0.4em;
+}
+
+#content {
+	float: left;
+	padding: 20px;
+	min-height: 500px;
+}
+
+#minesweeper {
+	padding: 10px;
+	background: #c0c0c0;
+	
+	border-top: 2px solid #fdfdfd;
+	border-right: 2px solid #6e6e6e;
+	border-bottom: 2px solid #6e6e6e;
+	border-left: 2px solid #fdfdfd;
+	
+	
+	display: none;
+}
+
+#status {
+	margin-top: 2em;
+	font-size: x-large;
+	text-align: center;
+}
+
+#new_game {
+	width: 7em;
+}
+
+</style>
+</head>
+<body>
+<div id="container">
+	<div id="controls">
+		<div id="settings">
+			<input id="board_size_slider" name="board_size_slider" type="range" min="8" max="32" step="8" accesskey="b" value="8">
+			<label for="board_size_slider">Board size: </label><div class="slider_value" id="board_size"></div>
+
+			<input id="mines_slider" name="mines_slider" type="range" min="1" max="8" accesskey="m" value="1">
+			<label for="mines_slider">Mines: </label><div class="slider_value" id="mines"></div>
+		</div>
+		
+		<div id="buttons">
+			<button id="new_game" accesskey="n">New Game</button>
+			<button id="validate" disabled accesskey="v">Validate</button>
+			<button id="cheat" disabled accesskey="c">Cheat</button>
+			<br>
+			<button id="save" disabled accesskey="s">Save</button>
+			<button id="load" accesskey="l">Load</button>
+		</div>
+		
+		<div id="status"></div>
+		
+		<div id="saveState"></div>
+	</div>
+	
+	<div id="content">
+		<div id="minesweeper"></div>
+	</div>
+</div>
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js"></script>
+<script>
+$(document).ready(function() {
+	"use strict";
+	
+	var BOARD = (function(my) {
+	
+		// Text names of numbers, used for CSS classes.
+		var numbers = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'],
+			width, height, mines, $boardElem, boardState, tilesRemaining, hasCheated = false,
+			isMouseDown = false,
+			isLoaded = false, // Whether or not the current game state comes from a loaded game.
+			gameListener;
+		
+		my.Util = {
+			// Ensure that the input is between min and max, setting it to either end of the bound (preferring min) if it does not fit.
+			sanitizeBound: function(input, min, max) {
+				if (!input) {
+					return min;
+				}
+				
+				if (input < min) {
+					return min;
+				}
+				
+				if (input > max) {
+					return max;
+				}
+				
+				return input;
+			},
+			
+			indexForCoordinates: function(x, y) {
+				return x + y * width;
+			},
+			
+			coordinatesForIndex: function(index) {
+				return {
+					column: index % width,
+					row: Math.floor(index / width)
+				};
+			}
+		};
+		
+		my.Tile = {
+			// Returns the neighbor tiles for a tile at the given index.
+			getNeighbors: function(index) {
+				var x, y, adjacentTileIdx,
+					coordinates = BOARD.Util.coordinatesForIndex(index),
+					neighbors = [];
+				
+				for (x = -1; x <= 1; x++) {
+					for (y = -1; y <= 1; y++) {
+						if ((coordinates.column + x >= 0 && coordinates.column + x < width && coordinates.row + y >= 0 && coordinates.row + y < height) // If the coordinates are in the bounds of the board...
+							&& (x !== 0 || y !== 0)) { // x and y are not both 0 at the same time so that the tile itself is not included in the neighbors...
+							adjacentTileIdx = BOARD.Util.indexForCoordinates(coordinates.column + x, coordinates.row + y);
+							neighbors[neighbors.length] = boardState[adjacentTileIdx];
+						}
+					}
+				}
+				
+				return neighbors;
+			},
+
+			// "Constructor" for a Tile object.
+			//     index: index into state array boardState
+			//     $tile: DOM element that represents this tile
+			//     loadedState: previously-loaded Tile we should copy
+			create: function(index, $tile, loadedState) {
+				var that = this,
+					flag = '<svg width="16" height="16" xmlns="http://www.w3.org/2000/svg"> <g> <rect fill="#000000" stroke="#000000" stroke-dasharray="null" stroke-linejoin="null" stroke-linecap="null" x="2.5" y="12.5" width="11" height="1" id="svg_2"/> <rect fill="#000000" stroke="#000000" stroke-dasharray="null" stroke-linejoin="null" stroke-linecap="null" x="5" y="11.5" width="6" height="0.5" id="svg_4"/> <rect id="svg_8" height="5.7" width="0.5" y="5" x="8" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" stroke-width="null" stroke="#000000" fill="#000000"/> <rect id="svg_9" height="0" width="0.1" y="11" x="10.3" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" stroke-width="null" stroke="#000000" fill="#000000"/> <path stroke="#ff0000" transform="rotate(-90 5.69571 4.3)" id="svg_6" d="m3.06001,7.1l2.63572,-5.6l2.6357,5.6l-5.27143,0l0.00001,0z" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" stroke-width="null" fill="#ff0000"/> </g> </svg>',
+					mine = '<svg width="16" height="16" xmlns="http://www.w3.org/2000/svg"> <g> <circle stroke="#000000" id="svg_2" r="2.915" cy="8" cx="8" stroke-width="5" fill="#000000"/> <line stroke="#000000" id="svg_4" y2="13.33333" y1="16" x2="8" x1="8" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null"/> <line stroke="#000000" id="svg_6" y2="2.66667" y1="0" x2="8" x1="8" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null"/> <line stroke="#000000" id="svg_8" y2="8" y1="8" x2="16" x1="13.33333" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null"/> <line stroke="#000000" id="svg_10" y2="8" y1="8" x2="2.66667" x1="0" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null"/> <rect stroke="#000000" id="svg_1" height="0.352" width="0.352" y="2.66667" x="2.66667" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" fill="none"/> <rect stroke="#000000" id="svg_3" height="0.352" width="0.352" y="2.66667" x="12.97067" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" fill="none"/> <rect stroke="#000000" id="svg_5" height="0.352" width="0.352" y="12.97067" x="12.97067" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" fill="none"/> <rect stroke="#000000" id="svg_7" height="0.352" width="0.352" y="12.97067" x="2.66667" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" fill="none"/> <rect stroke="#000000" fill="#ffffff" stroke-width="0" stroke-dasharray="null" stroke-linejoin="null" stroke-linecap="null" x="4.8" y="4.8" width="3.25" height="3.5" id="svg_14"/> </g> </svg>';
+				
+				return {
+					mined: loadedState ? loadedState.mined : false,
+					flagged: loadedState ? loadedState.flagged : false,
+					number: loadedState ? loadedState.number : 0,
+					$tile: $tile,
+					
+					// Returns an array of Tiles that are adjacent to this tile, including diagonals.
+					getNeighbors: function() {
+						return (function() {
+							return that.getNeighbors(index);
+						}());
+					},
+					
+					setFlagged: function(flagged) {
+						this.flagged = flagged;
+						if (flagged) {
+							this.reveal();
+						} else {
+							this.$tile.html('');
+						}
+					},
+					
+					isDepressed: function() {
+						return this.$tile.hasClass('depressed');
+					},
+					
+					// Reveals the contents of this tile. Set revealMisflagged to reveal misflagged tiles. Otherwise, they will be shown as regular flags.
+					reveal: function(revealMisflagged) {
+						var $t = this.$tile;
+						
+						if (revealMisflagged && this.flagged && !this.mined) {
+							$t.html('<div class="icon">' + mine + '</div><div class="number misflagged">X</div>');
+						} else if (this.flagged) {
+							$t.html('<div class="icon">' + flag + '</div>');
+						} else if (this.mined) {
+							$t.addClass('depressed').html('<div class="icon">' + mine + '</div>').attr('tabindex', -1);
+						} else if (this.number > 0) {
+							$t.addClass('depressed').html('<div class="number ' + numbers[this.number] + '">' + this.number + '</div>').attr('tabIndex', -1);
+						} else {
+							$t.addClass('depressed').html('').attr('tabIndex', -1);
+						}
+						
+						return this;
+					},
+					
+					// Recursively handle the effect of clicking on this tile and its neighbors, as appropriate.
+					depress: function() {
+						var i, n, neighbors, neighborTile;
+						
+						this.$tile.trigger('minesweeper.tileDepressed');
+						this.reveal();
+						
+						if (this.mined) {
+							this.$tile.addClass('mined');
+							$boardElem.trigger('minesweeper.defeat');
+						} else if (this.number == 0) {
+							neighbors = this.getNeighbors();
+							for (i = 0, n = neighbors.length; i < n; i++) {
+								neighborTile = neighbors[i];
+								
+								if (!neighborTile.mined && !neighborTile.flagged && !neighborTile.isDepressed()) {
+									neighborTile.depress();
+								}
+							}
+						}
+					}
+				};
+			}
+		};
+		
+		// Creates the markup for the board in the given element and attaches event handlers.
+		function createBoard(elem) {
+			var board = '<div class="board">',
+				tile = '<div class="tile" tabindex="0"></div>',
+				i, j;
+			
+			for (i = 0; i < width; i++) {
+				for (j = 0; j < height; j++) {
+					// Debug code to see index of tile.
+					//board += tile.replace('>', ' title="' + (i * width + j) + '">');
+					board += tile;
+				}
+				board += '<br />';
+			}
+			board += '</div>';
+			
+			$(elem).html(board);
+			$boardElem = $('div.board', $(elem));
+			
+			// Calculate board size based on tile dimensions and borders.
+			// Hardcode 20 = 16 tile width and height + 2 each for border.
+			// We could also use a plugin to read the CSS style.
+			$boardElem.css('width', 20 * width);
+			$boardElem.css('height', 20 * height);
+		}
+		
+		function disable() {
+			$boardElem.off('mousedown');
+			$boardElem.off('mouseup');
+		}
+		
+		// Reveals all mine squares and incorrectly flagged tiles.
+		function revealMines() {
+			var i, n;
+			
+			for (i = 0, n = boardState.length; i < n; i++) {
+				if (boardState[i].flagged && !boardState[i].mined) {
+					boardState[i].reveal(true);
+				} else if (!boardState[i].flagged && boardState[i].mined) {
+					boardState[i].reveal();
+				}
+			}
+		}
+		
+		function attachEventHandlers() {
+			$boardElem.on({
+				mousedown: function(event) {
+					var tile = $(this).data('tile');
+					
+					// Prevent drag behavior.
+					event.preventDefault();
+
+					// If it's the right mouse button that's down...
+					if (event.which === 3) {
+						if (!isMouseDown && !tile.isDepressed()) { // If we're not already in the middle of a left-click and tile is not already depressed...
+							tile.setFlagged(!tile.flagged);
+						}
+					} else {
+						isMouseDown = true;
+						$(this).trigger('mouseenter');
+					}
+				},
+				
+				mouseenter: function() {
+					var tile = $(this).data('tile');
+					
+					$(this).data('wasDepressed', tile.isDepressed());
+					if (isMouseDown && !tile.flagged) {	
+						if (!$(this).data('wasDepressed')) {
+							$(this).addClass('depressed');
+						}
+					}
+				},
+				
+				mouseleave: function() {
+					var tile = $(this).data('tile');
+					
+					if (isMouseDown && !tile.flagged) {
+						if (!$(this).data('wasDepressed')) {
+							$(this).removeClass('depressed');
+						}
+					}
+				},
+				
+				mouseup: function(event) {
+					var tile = $(this).data('tile');
+					
+					if (event.which === 3) {
+						// Ignore right-click mouseup events.
+						return;
+					}
+					
+					if (tile.flagged) {
+						isMouseDown = false;
+					} else if (isMouseDown) {
+						isMouseDown = false;
+						
+						if (!$(this).data('wasDepressed')) {
+							tile.depress();
+						}
+					}
+				},
+				
+				contextmenu: function() {
+					return false;
+				},
+				
+				keypress: function(event) {
+					if (event.which === 13) { // Enter
+						$(this).trigger('mousedown');
+						$(this).trigger('mouseup');
+					} else if (event.which === 32) { // Space
+						$(this).trigger({ type: 'mousedown', which: 3 });
+						$(this).trigger({ type: 'mouseup', which: 3 });
+					} /* else if (event.which == 37) { // Left arrow
+					} else if (event.which == 38) { // Up arrow
+					} else if (event.which == 39) { // Right arrow
+					} else if (event.which == 40) { // Down arrow
+					} */
+				},
+				
+				'minesweeper.tileDepressed': function() {
+					tilesRemaining -= 1;
+
+					if (tilesRemaining == 0) {
+						$boardElem.trigger('minesweeper.victory');
+					} else if (tilesRemaining < 0) {
+						console.error("Tiles remaining dropping below zero.");
+					}
+				}
+			}, 'div.tile');
+			
+			$boardElem.on({
+				'minesweeper.victory': function() {
+					var i, n;
+			
+					// Flag all unflagged mined tiles.
+					for (i = 0, n = boardState.length; i < n; i++) {
+						if (!boardState[i].flagged && boardState[i].mined) {
+							boardState[i].setFlagged(true);
+						}
+					}
+
+					$boardElem.trigger('minesweeper.end');
+					gameListener.victory({ hasCheated: hasCheated });
+				},
+				
+				'minesweeper.defeat': function() {
+					revealMines();
+					$boardElem.trigger('minesweeper.end');
+					gameListener.defeat({ hasCheated: hasCheated });
+				},
+				
+				'minesweeper.end': function() {
+					disable();
+				}
+			});
+		}
+		
+		function placeMines() {
+			var tile, tileIdx,
+				minesLeft = mines,
+				i, n, neighbors, neighborTile;
+			
+			while (minesLeft > 0) {
+				// Chooose a random location to place a mine.
+				tileIdx = Math.floor(Math.random() * ((width * height) - 1));
+				tile = boardState[tileIdx];
+				if (!tile.mined) {
+					minesLeft -= 1;
+					
+					tile.mined = true;
+									
+					// Increment numbers in tiles around mine.
+					neighbors = tile.getNeighbors();
+					for (i = 0, n = neighbors.length; i < n; i++) {
+						neighborTile = neighbors[i];
+						
+						//console.log('Mine: (' + tile.column + ', ' + tile.row + ') -- Adjacent Tile: (' + (neighborTile.column) + ', ' + (neighborTile.row) + ')');
+						if (!neighborTile.mined) {
+							neighborTile.number = (neighborTile.number || 0) + 1;
+						}
+					}
+				}
+			}
+		}
+		
+		function initializeBoardState() {
+			var tiles = $boardElem.children('div.tile').toArray(),
+				i, n, $t, wasDepressed = false;
+				
+			for (i = 0, n = tiles.length; i < n; i++) {
+				wasDepressed = false;
+				$t = $(tiles[i]);
+				if (boardState[i] && boardState[i].wasDepressed) {
+					wasDepressed = true;
+				}
+				boardState[i] = BOARD.Tile.create(i, $t, boardState[i]);
+				if (wasDepressed || boardState[i].flagged) {
+					delete boardState[i].wasDepressed;
+					boardState[i].reveal();
+				}
+				$t.data('tile', boardState[i]);
+			}
+		}
+		
+		function initializeBoard() {
+			initializeBoardState();
+			if (!isLoaded) {
+				placeMines();
+			}
+		}
+		
+		// Initializes game state but does not render the board.
+		// gameListener: callback for game events.
+		my.init = function(myGameListener, myWidth, myHeight, myMines) {
+			gameListener = myGameListener || gameListener || {};
+			
+			// Whether or not the current game state comes from a loaded game.
+			isLoaded = false;
+			
+			// Width of board, in tiles.
+			width = BOARD.Util.sanitizeBound(myWidth, 8, 128);
+			// Height of board, in tiles.
+			height = BOARD.Util.sanitizeBound(myHeight, 8, 128);
+			// Number of mines on the board.
+			mines = BOARD.Util.sanitizeBound(myMines, 10, width * height - 1);
+			
+			// Element that contains HTML for board.
+			$boardElem = null;
+			// Array of objects describing state of board. See: initializeBoardState()
+			boardState = [];
+			
+			// Number of depressable tiles left.
+			tilesRemaining = width * height - mines;
+			
+			hasCheated = false;
+		};
+		
+		// Draws the board and initializes game state.
+		my.render = function(elem) {
+			createBoard(elem);
+			attachEventHandlers();
+			initializeBoard();
+		};
+		
+		// Verify whether all mined tiles are flagged and no unmined tiles are flagged.
+		my.validate = function() {
+			var i = 0, n = boardState.length, valid = true;
+			
+			while (i < n) {
+				if ((boardState[i].flagged && !boardState[i].mined) || (!boardState[i].flagged && boardState[i].mined)) {
+					valid = false;
+					break;
+				}
+				
+				i += 1;
+			}
+			
+			if (valid) {
+				$boardElem.trigger('minesweeper.victory');
+			} else {
+				$boardElem.trigger('minesweeper.defeat');
+			}
+		};
+				
+		my.cheat = function(shouldCheat) {
+			var i, n;
+			
+			hasCheated = true;
+			if (boardState) {
+				for (i = 0, n = boardState.length; i < n; i++) {
+					if (boardState[i].mined) {
+						if (shouldCheat) {
+							boardState[i].$tile.addClass('cheat');
+						} else {
+							boardState[i].$tile.removeClass('cheat');
+						}
+					}
+				}
+			}
+		};
+		
+		my.victory = function() {
+			if ($boardElem) {
+				$boardElem.trigger('minesweeper.victory');
+			}
+		};
+		
+		my.defeat = function() {
+			if ($boardElem) {
+				$boardElem.trigger('minesweeper.defeat');
+			}
+		};
+		
+		// Gather game state and return as JSON.
+		my.save = function() {
+			var i = 0, n = boardState.length, state = {}, tile, currentBoard = [], game = '';
+			
+			game = width + '|' + height + '|' + mines + '|' + tilesRemaining + '|' + (hasCheated ? 1 : 0) + '-';
+			
+			for (; i < n; i++) {
+				game += (boardState[i].mined ? 1 : 0);
+				game += (boardState[i].flagged ? 1 : 0);
+				game += boardState[i].number;
+				game += (boardState[i].isDepressed() ? 1 : 0);
+			}
+			
+			return game;
+		};
+		
+		// Gather game state and return as JSON.
+		my.load = function(state) {
+			var states, gameState, tileStates,
+				i, n, loadedBoard;
+			
+			if (!state || state.length <= 0) {
+				return;
+			}
+			
+			try {
+				states = state.split('-');
+				gameState = states[0].split('|');
+				tileStates = states[1];
+				
+				BOARD.init(undefined, gameState[0], gameState[1], gameState[2]);
+				isLoaded = true;
+				tilesRemaining = gameState[3];
+				hasCheated = 1 == gameState[4];
+
+				for (i = 0, n = tileStates.length / 4; i / 4 < n; i += 4) {
+					boardState[i / 4] = $.extend(boardState[i / 4], {
+						mined: 1 == tileStates.slice(i, i + 1),
+						flagged: 1 == tileStates.slice(i + 1, i + 2),
+						number: Number(tileStates.slice(i + 2, i + 3)),
+						wasDepressed: 1 == tileStates.slice(i + 3, i + 4)
+					});
+				}
+			} catch (e) {
+				console.warn('Could not load state:', state);
+			}
+		};
+		
+		return my;
+	}(BOARD || {}));
+	
+	// Initialize the game state from the page controls;
+	function initializeFromPage() {
+		BOARD.init({
+			victory: function(state) {
+				if (state.hasCheated) {
+					$('#status').html('Victory (with cheating)!');
+				} else {
+					$('#status').html('Victory!');
+				}
+				$('#new_game').click();
+			},
+			defeat: function(state) {
+				if (state.hasCheated) {
+					$('#status').html('Defeat (with cheating)!');
+				} else {
+					$('#status').html('Defeat!');
+				}
+				$('#new_game').click();
+			}
+		}, $('#board_size').html(), $('#board_size').html(), $('#mines').html());
+	}
+	initializeFromPage();
+	
+	$('#board_size_slider').on('change', function() {
+		$('#board_size').html(this.value);
+		$('#mines_slider').change();
+	});
+	$('#board_size_slider').change();
+	
+	$('#mines_slider').on('change', function() {
+		var boardSize = $('#board_size').html(),
+			mineCount = Math.floor(boardSize * boardSize / 2 / (8 - this.value + 1));
+			
+		if (mineCount < 10) {
+			mineCount = 10;
+		}
+		
+		$('#mines').html(mineCount);
+		
+		initializeFromPage();
+	});
+	$('#mines_slider').change();
+	
+	function enable(elems) {
+		elems = elems || [];
+		$.map(elems, function(elem) {
+			elem.removeAttr('disabled');
+		});
+	}
+	
+	function disable(elems) {
+		elems = elems || [];
+		$.map(elems, function(elem) {
+			elem.attr('disabled', 'disabled');
+		});
+	}
+	
+	$('#new_game').on('click', function(event) {
+		if ($(this).data('isInGame')) {
+			// End the current game.
+			if (event.which) {
+				// If the event was manually triggered, signal defeat. Otherwise, it's the game resetting itself.
+				BOARD.defeat();
+			}
+				
+			$(this).removeData('isInGame');
+			$('#new_game').html('New Game');
+			
+			enable([ $('#board_size_slider'), $('#mines_slider'), $('#load') ]);
+			disable([ $('#validate'), $('#cheat'), $('#save') ]);
+			
+			initializeFromPage();
+		} else {
+			BOARD.render($('#minesweeper'));
+			
+			// Start a new game.
+			$('#minesweeper').css('display', 'block');
+			
+			$(this).data('isInGame', true);
+			$('#cheat').trigger('cheat.reset');
+			$('#new_game').html('Reset');
+			$('#status').html('');
+			$('#saveState').html('');
+			
+			disable([ $('#board_size_slider'), $('#mines_slider'), $('#load') ]);
+			enable([ $('#validate'), $('#cheat'), $('#save') ]);
+		}
+	});
+	
+	$('#validate').on('click', BOARD.validate);
+	
+	$('#cheat').on({
+		'click': function() {
+			var isCheating = $(this).data('isCheating') || false;
+			isCheating = !isCheating;
+			$(this).data('isCheating', isCheating);
+			
+			BOARD.cheat(isCheating);
+			if (isCheating) {
+				$('#cheat').html('Uncheat');
+			} else {
+				$('#cheat').html('Cheat');
+			}
+		},
+		
+		'cheat.reset': function() {
+			$(this).removeData('isCheating');
+			$('#cheat').html('Cheat');
+		}
+	});
+	
+	$('#save').on('click', function() {
+		$('#saveState').html(BOARD.save());
+	});
+	
+	$('#load').on('click', function() {	
+		var json = prompt('Enter save data');
+		BOARD.load(json);
+	});
+});
+</script>
+</body>
+</html>
