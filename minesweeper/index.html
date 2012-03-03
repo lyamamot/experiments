@@ -103,7 +103,6 @@ body {
 
 .game_options {
 	width: 275px;
-	max-width: 275px;
 	float: left;
 	border: 0;
 	padding: 15px;
@@ -214,9 +213,20 @@ body {
 }
 
 #status {
-	margin-top: 2em;
-	font-size: x-large;
-	text-align: center;
+	margin: 0.6em 0;
+	font-size: large;
+}
+
+#save_state {
+	margin-top: 1.5em;
+	word-wrap: break-word;
+}
+
+#save_data {
+	background: #EFE672;
+	border-radius: 5px 5px 5px 5px;
+	padding: 1em;
+	font-family: monospaced;
 }
 
 #new_game {
@@ -270,15 +280,15 @@ body {
 			<button id="cheat" disabled accesskey="c">Cheat</button>
 			<br>
 			<button id="save" disabled accesskey="s">Save</button>
-			<button id="load" accesskey="l">Load</button>
+			<button id="load" disabled accesskey="l">Load</button>
+			<button id="load_data" accesskey="d">Load Data</button>
 		</div>
 		
-		<div id="status"></div>
-		
-		<div id="saveState"></div>
+		<div id="save_state"></div>
 	</div>
 	
 	<div id="content">
+		<div id="status"></div>
 		<div id="minesweeper"></div>
 	</div>
 </div>
@@ -292,8 +302,8 @@ $(document).ready(function() {
 	
 		// Text names of numbers, used for CSS classes.
 		var numbers = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'],
-			width, height, mines, $boardElem, boardState, tilesRemaining, hasCheated = false,
-			isMouseDown = false,
+			width, height, mines, $boardElem, boardState, tilesRemaining, minesRemaining, hasCheated = false,
+			isMouseDown = false, isInGame = false,
 			isLoaded = false, // Whether or not the current game state comes from a loaded game.
 			gameListener;
 		
@@ -327,106 +337,115 @@ $(document).ready(function() {
 			}
 		};
 		
-		my.Tile = {
-			// Returns the neighbor tiles for a tile at the given index.
-			getNeighbors: function(index) {
-				var x, y, adjacentTileIdx,
-					coordinates = BOARD.Util.coordinatesForIndex(index),
-					neighbors = [];
-				
-				for (x = -1; x <= 1; x++) {
-					for (y = -1; y <= 1; y++) {
-						if ((coordinates.column + x >= 0 && coordinates.column + x < width && coordinates.row + y >= 0 && coordinates.row + y < height) // If the coordinates are in the bounds of the board...
-							&& (x !== 0 || y !== 0)) { // x and y are not both 0 at the same time so that the tile itself is not included in the neighbors...
-							adjacentTileIdx = BOARD.Util.indexForCoordinates(coordinates.column + x, coordinates.row + y);
-							neighbors[neighbors.length] = boardState[adjacentTileIdx];
-						}
-					}
-				}
-				
-				return neighbors;
-			},
+		// Constructor for a Tile object.
+		//     index: index into state array boardState
+		//     $tile: DOM element that represents this tile
+		//     loadedState: previously-loaded Tile we should copy
+		my.Tile = function(index, $tile, loadedState) {
+			this.index = index;
+			this.$tile = $tile;
+			this.loadedState = loadedState;
+			
+			this.mined = loadedState ? loadedState.mined : false;
+			this.flagged = loadedState ? loadedState.flagged : false;
+			this.number = loadedState ? loadedState.number : 0;
+		};
 
-			// "Constructor" for a Tile object.
-			//     index: index into state array boardState
-			//     $tile: DOM element that represents this tile
-			//     loadedState: previously-loaded Tile we should copy
-			create: function(index, $tile, loadedState) {
-				var that = this,
-					flag = '<svg width="16" height="16" xmlns="http://www.w3.org/2000/svg"> <g> <rect fill="#000000" stroke="#000000" stroke-dasharray="null" stroke-linejoin="null" stroke-linecap="null" x="2.5" y="12.5" width="11" height="1" id="svg_2"/> <rect fill="#000000" stroke="#000000" stroke-dasharray="null" stroke-linejoin="null" stroke-linecap="null" x="5" y="11.5" width="6" height="0.5" id="svg_4"/> <rect id="svg_8" height="5.7" width="0.5" y="5" x="8" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" stroke-width="null" stroke="#000000" fill="#000000"/> <rect id="svg_9" height="0" width="0.1" y="11" x="10.3" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" stroke-width="null" stroke="#000000" fill="#000000"/> <path stroke="#ff0000" transform="rotate(-90 5.69571 4.3)" id="svg_6" d="m3.06001,7.1l2.63572,-5.6l2.6357,5.6l-5.27143,0l0.00001,0z" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" stroke-width="null" fill="#ff0000"/> </g> </svg>',
-					mine = '<svg width="16" height="16" xmlns="http://www.w3.org/2000/svg"> <g> <circle stroke="#000000" id="svg_2" r="2.915" cy="8" cx="8" stroke-width="5" fill="#000000"/> <line stroke="#000000" id="svg_4" y2="13.33333" y1="16" x2="8" x1="8" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null"/> <line stroke="#000000" id="svg_6" y2="2.66667" y1="0" x2="8" x1="8" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null"/> <line stroke="#000000" id="svg_8" y2="8" y1="8" x2="16" x1="13.33333" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null"/> <line stroke="#000000" id="svg_10" y2="8" y1="8" x2="2.66667" x1="0" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null"/> <rect stroke="#000000" id="svg_1" height="0.352" width="0.352" y="2.66667" x="2.66667" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" fill="none"/> <rect stroke="#000000" id="svg_3" height="0.352" width="0.352" y="2.66667" x="12.97067" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" fill="none"/> <rect stroke="#000000" id="svg_5" height="0.352" width="0.352" y="12.97067" x="12.97067" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" fill="none"/> <rect stroke="#000000" id="svg_7" height="0.352" width="0.352" y="12.97067" x="2.66667" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" fill="none"/> <rect stroke="#000000" fill="#ffffff" stroke-width="0" stroke-dasharray="null" stroke-linejoin="null" stroke-linecap="null" x="4.8" y="4.8" width="3.25" height="3.5" id="svg_14"/> </g> </svg>';
+		my.Tile.prototype = (function() {
+			// Using SVGs here is about four times slower than images but they look so much better.
+			var flag = '<svg width="16" height="16" xmlns="http://www.w3.org/2000/svg"> <g> <rect fill="#000000" stroke="#000000" stroke-dasharray="null" stroke-linejoin="null" stroke-linecap="null" x="2.5" y="12.5" width="11" height="1" id="svg_2"/> <rect fill="#000000" stroke="#000000" stroke-dasharray="null" stroke-linejoin="null" stroke-linecap="null" x="5" y="11.5" width="6" height="0.5" id="svg_4"/> <rect id="svg_8" height="5.7" width="0.5" y="5" x="8" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" stroke-width="null" stroke="#000000" fill="#000000"/> <rect id="svg_9" height="0" width="0.1" y="11" x="10.3" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" stroke-width="null" stroke="#000000" fill="#000000"/> <path stroke="#ff0000" transform="rotate(-90 5.69571 4.3)" id="svg_6" d="m3.06001,7.1l2.63572,-5.6l2.6357,5.6l-5.27143,0l0.00001,0z" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" stroke-width="null" fill="#ff0000"/> </g> </svg>',
+				mine = '<svg width="16" height="16" xmlns="http://www.w3.org/2000/svg"> <g> <circle stroke="#000000" id="svg_2" r="2.915" cy="8" cx="8" stroke-width="5" fill="#000000"/> <line stroke="#000000" id="svg_4" y2="13.33333" y1="16" x2="8" x1="8" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null"/> <line stroke="#000000" id="svg_6" y2="2.66667" y1="0" x2="8" x1="8" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null"/> <line stroke="#000000" id="svg_8" y2="8" y1="8" x2="16" x1="13.33333" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null"/> <line stroke="#000000" id="svg_10" y2="8" y1="8" x2="2.66667" x1="0" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null"/> <rect stroke="#000000" id="svg_1" height="0.352" width="0.352" y="2.66667" x="2.66667" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" fill="none"/> <rect stroke="#000000" id="svg_3" height="0.352" width="0.352" y="2.66667" x="12.97067" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" fill="none"/> <rect stroke="#000000" id="svg_5" height="0.352" width="0.352" y="12.97067" x="12.97067" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" fill="none"/> <rect stroke="#000000" id="svg_7" height="0.352" width="0.352" y="12.97067" x="2.66667" stroke-linecap="null" stroke-linejoin="null" stroke-dasharray="null" fill="none"/> <rect stroke="#000000" fill="#ffffff" stroke-width="0" stroke-dasharray="null" stroke-linejoin="null" stroke-linecap="null" x="4.8" y="4.8" width="3.25" height="3.5" id="svg_14"/> </g> </svg>',
+				minedTile = '<div class="icon">' + mine + '</div>',
+				misflaggedTile = minedTile + '<div class="number misflagged">X</div>',
+				flaggedTile = '<div class="icon">' + flag + '</div>',
 				
-				return {
-					mined: loadedState ? loadedState.mined : false,
-					flagged: loadedState ? loadedState.flagged : false,
-					number: loadedState ? loadedState.number : 0,
-					$tile: $tile,
+				// Applies a function to each neighbor of this tile.
+				eachNeighbor = function(fn) {
+					var thisObj = this;
 					
-					// Returns an array of Tiles that are adjacent to this tile, including diagonals.
-					getNeighbors: function() {
-						return (function() {
-							return that.getNeighbors(index);
-						}());
-					},
-					
-					setFlagged: function(flagged) {
-						this.flagged = flagged;
-						if (flagged) {
-							this.reveal();
-							this.$tile.trigger('minesweeper.tile.flagged');
-						} else {
-							this.$tile.html('');
-							this.$tile.trigger('minesweeper.tile.unflagged');
-						}
-					},
-					
-					isDepressed: function() {
-						return this.$tile.hasClass('depressed');
-					},
-					
-					// Reveals the contents of this tile. Set revealMisflagged to reveal misflagged tiles. Otherwise, they will be shown as regular flags.
-					reveal: function(revealMisflagged) {
-						var $t = this.$tile;
+					return (function() {
+						var x, y, adjacentTileIdx,
+							coordinates = BOARD.Util.coordinatesForIndex(thisObj.index),
+							neighbors = [];
 						
-						if (revealMisflagged && this.flagged && !this.mined) {
-							$t.html('<div class="icon">' + mine + '</div><div class="number misflagged">X</div>');
-						} else if (this.flagged) {
-							$t.html('<div class="icon">' + flag + '</div>');
-						} else if (this.mined) {
-							$t.addClass('depressed').html('<div class="icon">' + mine + '</div>').attr('tabindex', -1);
-						} else if (this.number > 0) {
-							$t.addClass('depressed').html('<div class="number ' + numbers[this.number] + '">' + this.number + '</div>').attr('tabIndex', -1);
-						} else {
-							$t.addClass('depressed').html('').attr('tabIndex', -1);
-						}
-						
-						return this;
-					},
-					
-					// Recursively handle the effect of clicking on this tile and its neighbors, as appropriate.
-					depress: function() {
-						var i, n, neighbors, neighborTile;
-						
-						this.$tile.trigger('minesweeper.tile.depressed');
-						this.reveal();
-						
-						if (this.mined) {
-							this.$tile.addClass('mined');
-							$boardElem.trigger('minesweeper.defeat');
-						} else if (this.number === 0) {
-							neighbors = this.getNeighbors();
-							for (i = 0, n = neighbors.length; i < n; i++) {
-								neighborTile = neighbors[i];
-								
-								if (!neighborTile.mined && !neighborTile.flagged && !neighborTile.isDepressed()) {
-									neighborTile.depress();
+						for (x = -1; x <= 1; x++) {
+							for (y = -1; y <= 1; y++) {
+								if ((coordinates.column + x >= 0 && coordinates.column + x < width && coordinates.row + y >= 0 && coordinates.row + y < height) // If the coordinates are in the bounds of the board...
+									&& (x !== 0 || y !== 0)) { // x and y are not both 0 at the same time so that the tile itself is not included in the neighbors...
+									adjacentTileIdx = BOARD.Util.indexForCoordinates(coordinates.column + x, coordinates.row + y);
+									fn.apply(this, [boardState[adjacentTileIdx]]);
 								}
 							}
 						}
+					}());
+				},
+				
+				setFlagged = function(flagged) {
+					this.flagged = flagged;
+					if (flagged) {
+						this.reveal().$tile.trigger('minesweeper.tile.flagged');
+					} else {
+						this.$tile.html('').trigger('minesweeper.tile.unflagged');
 					}
+				},
+				
+				isDepressed = function() {
+					return this.$tile.hasClass('depressed');
+				},
+				
+				reveal = function(revealMisflagged) {
+					var $t = this.$tile;
+					
+					if (revealMisflagged && this.flagged && !this.mined) {
+						$t.html(misflaggedTile);
+					} else if (this.flagged) {
+						$t.html(flaggedTile);
+					} else if (this.mined) {
+						$t.addClass('depressed').html(minedTile).attr('tabindex', -1);
+					} else if (this.number > 0) {
+						$t.addClass('depressed').html('<div class="number ' + numbers[this.number] + '">' + this.number + '</div>').attr('tabIndex', -1);
+					} else {
+						$t.addClass('depressed').html('').attr('tabIndex', -1);
+					}
+					
+					return this;
+				},
+				
+				depress = function() {
+					var i, n, neighbors, neighborTile;
+					
+					this.reveal();
+					
+					if (this.mined) {
+						this.$tile.addClass('mined');
+						$boardElem.trigger('minesweeper.defeat');
+					} else if (this.number === 0) {
+						this.eachNeighbor(function(neighbor) {
+							if (!neighbor.mined && !neighbor.flagged && !neighbor.isDepressed()) {
+								neighbor.depress();
+							}
+						});
+					}
+					
+					this.$tile.trigger('minesweeper.tile.depressed');
 				};
-			}
-		};
+				
+			return {
+				// Runs the given function on each neighbor.
+				eachNeighbor: eachNeighbor,
+				
+				// Sets the flagged state of this tile and fires events regarding the state.
+				setFlagged: setFlagged,
+				
+				isDepressed: isDepressed,
+				
+				// Reveals the contents of this tile. Set revealMisflagged to reveal misflagged tiles. Otherwise, they will be shown as regular flags.
+				reveal: reveal,
+				
+				// Recursively handle the effect of clicking on this tile and its neighbors, as appropriate.
+				depress: depress
+			};
+		}());
 		
 		// Creates the markup for the board in the given element and attaches event handlers.
 		function createBoard(elem) {
@@ -563,10 +582,12 @@ $(document).ready(function() {
 				},
 				
 				'minesweeper.tile.flagged': function() {
+					minesRemaining -= 1;
 					gameListener.tileFlagged();
 				},
 				
 				'minesweeper.tile.unflagged': function() {
+					minesRemaining += 1;
 					gameListener.tileUnflagged();
 				}
 			}, 'div.tile');
@@ -574,6 +595,10 @@ $(document).ready(function() {
 			$boardElem.on({
 				'minesweeper.victory': function() {
 					var i, n;
+					
+					if (!isInGame) {
+						return;
+					}
 			
 					// Flag all unflagged mined tiles.
 					for (i = 0, n = boardState.length; i < n; i++) {
@@ -587,12 +612,17 @@ $(document).ready(function() {
 				},
 				
 				'minesweeper.defeat': function() {
+					if (!isInGame) {
+						return;
+					}
+					
 					revealMines();
 					$boardElem.trigger('minesweeper.end');
 					gameListener.defeat({ hasCheated: hasCheated });
 				},
 				
 				'minesweeper.end': function() {
+					isInGame = false;
 					disable();
 				}
 			});
@@ -611,24 +641,21 @@ $(document).ready(function() {
 					minesLeft -= 1;
 					
 					tile.mined = true;
-									
+					
 					// Increment numbers in tiles around mine.
-					neighbors = tile.getNeighbors();
-					for (i = 0, n = neighbors.length; i < n; i++) {
-						neighborTile = neighbors[i];
-						
+					tile.eachNeighbor(function(neighbor) {
 						//console.log('Mine: (' + tile.column + ', ' + tile.row + ') -- Adjacent Tile: (' + (neighborTile.column) + ', ' + (neighborTile.row) + ')');
-						if (!neighborTile.mined) {
-							neighborTile.number = (neighborTile.number || 0) + 1;
+						if (!neighbor.mined) {
+							neighbor.number = (neighbor.number || 0) + 1;
 						}
-					}
+					});
 				}
 			}
 		}
 		
 		function initializeBoardState() {
 			var tiles = $boardElem.children('div.tile').toArray(),
-				i, n, $t, wasDepressed = false;
+				i, n, $t, wasDepressed;
 				
 			for (i = 0, n = tiles.length; i < n; i++) {
 				wasDepressed = false;
@@ -636,13 +663,15 @@ $(document).ready(function() {
 				if (boardState[i] && boardState[i].wasDepressed) {
 					wasDepressed = true;
 				}
-				boardState[i] = BOARD.Tile.create(i, $t, boardState[i]);
+				boardState[i] = new BOARD.Tile(i, $t, boardState[i]);
 				if (wasDepressed || boardState[i].flagged) {
 					delete boardState[i].wasDepressed;
 					boardState[i].reveal();
 				}
 				$t.data('tile', boardState[i]);
 			}
+
+			isInGame = true;
 		}
 		
 		function initializeBoard() {
@@ -660,7 +689,7 @@ $(document).ready(function() {
 				defeat: function() {},
 				tileFlagged: function() {},
 				tileUnflagged: function() {}
-			}, myGameListener);
+			}, gameListener, myGameListener || {});
 			
 			// Whether or not the current game state comes from a loaded game.
 			isLoaded = false;
@@ -680,6 +709,9 @@ $(document).ready(function() {
 			// Number of depressable tiles left.
 			tilesRemaining = width * height - mines;
 
+			// This is not an absolute count of mines remaining, but rather, a count of (mines - [number of flagged tiles]). This value could be negative.
+			minesRemaining = mines;
+			
 			hasCheated = false;
 		};
 		
@@ -743,7 +775,7 @@ $(document).ready(function() {
 		my.save = function() {
 			var i, n = boardState.length, game;
 			
-			game = width + '|' + height + '|' + mines + '|' + tilesRemaining + '|' + (hasCheated ? 1 : 0) + '-';
+			game = width + '|' + height + '|' + mines + '|' + tilesRemaining + '|' + minesRemaining + '|' + (hasCheated ? 1 : 0) + '-';
 			
 			for (i = 0; i < n; i++) {
 				game += (boardState[i].mined ? 1 : 0);
@@ -772,56 +804,114 @@ $(document).ready(function() {
 				BOARD.init(undefined, gameState[0], gameState[1], gameState[2]);
 				isLoaded = true;
 				tilesRemaining = gameState[3];
-				hasCheated = "1" === gameState[4];
+				minesRemaining = gameState[4];
+				hasCheated = "1" === gameState[5];
 
-				for (i = 0, n = tileStates.length; i < n; i++) {
+				for (i = 0, n = tileStates.length / 4; i < n; i++) {
 					j = i * 4;
-					boardState[i] = $.extend(boardState[i], {
+					
+					// Not a complete Tile object at this point. Will get loaded on render.
+					boardState[i] = {
 						mined: "1" === tileStates.slice(j, j + 1),
 						flagged: "1" === tileStates.slice(j + 1, j + 2),
 						number: Number(tileStates.slice(j + 2, j + 3)),
 						wasDepressed: "1" === tileStates.slice(j + 3, j + 4)
-					});
+					};
 				}
 			} catch (e) {
 				console.warn('Could not load state:', state);
 			}
 		};
 		
+		my.isInGame = function() {
+			return isInGame;
+		};
+
+		my.getTilesRemaining = function() {
+			return tilesRemaining;
+		};
+		
+		my.getMinesRemaining = function() {
+			return minesRemaining;
+		};
+		
 		return my;
-	}(BOARD || {}));
+	}(BOARD || {})),
+
+	saveState;
+	
+	function enable(elems) {
+		elems = elems || [];
+		$.map(elems, function(elem) {
+			elem.removeAttr('disabled');
+		});
+	}
+	
+	function disable(elems) {
+		elems = elems || [];
+		$.map(elems, function(elem) {
+			elem.attr('disabled', 'disabled');
+		});
+	}
+	
+	// Set the game controls to the 'in-game' state.
+	function setGameControls() {
+		$('#minesweeper').css('display', 'block');
+			
+		$('#cheat').trigger('cheat.reset');
+		$('#new_game').html('Reset');
+		$('#status').html('Mines left: ' + BOARD.getMinesRemaining());
+		
+		if (saveState === '') {
+			disable([ $('#load') ]);
+		}
+		
+		disable([ $('#filters input') ]);
+		enable([ $('#validate'), $('#cheat'), $('#save') ]);
+	}
+	
+	// Reset the game controls for a new game.
+	function resetGameControls() {
+		$('#new_game').html('New Game');
+		$('#save_state').html('');
+		
+		enable([ $('#filters input') ]);
+		disable([ $('#validate'), $('#cheat'), $('#save') ]);
+	}
 		
 	// Initialize the game state from the page controls.
 	function initializeFromPage() {
 		BOARD.init({
-			mines: $('#board_mines').html(),
-			
 			victory: function(state) {
 				if (state.hasCheated) {
 					$('#status').html('Victory (with cheating)!');
 				} else {
 					$('#status').html('Victory!');
 				}
-				$('#new_game').click();
+				resetGameControls();
 			},
+			
 			defeat: function(state) {
 				if (state.hasCheated) {
 					$('#status').html('Defeat (with cheating)!');
 				} else {
 					$('#status').html('Defeat!');
 				}
-				$('#new_game').click();
+				resetGameControls();
 			},
+			
 			tileFlagged: function() {
 				this.mines -= 1;
 				this.updateMines();
 			},
+			
 			tileUnflagged: function() {
 				this.mines += 1;
 				this.updateMines();
 			},
+			
 			updateMines: function() {
-				$('#status').html('Mines left: ' + this.mines);
+				$('#status').html('Mines left: ' + BOARD.getMinesRemaining());
 			}
 		}, $('#board_size').html(), $('#board_size').html(), $('#board_mines').html());
 	}
@@ -844,49 +934,23 @@ $(document).ready(function() {
 	});
 	$('#filters input').change();
 	
-	function enable(elems) {
-		elems = elems || [];
-		$.map(elems, function(elem) {
-			elem.removeAttr('disabled');
-		});
-	}
-	
-	function disable(elems) {
-		elems = elems || [];
-		$.map(elems, function(elem) {
-			elem.attr('disabled', 'disabled');
-		});
-	}
-	
-	$('#new_game').on('click', function(event) {
-		if ($(this).data('isInGame')) {
-			// End the current game.
-			if (event.which) {
-				// If the event was manually triggered, signal defeat. Otherwise, it's the game resetting itself.
-				BOARD.defeat();
-			}
-				
-			$(this).removeData('isInGame');
-			$('#new_game').html('New Game');
-			$('#saveState').html('');
-			
-			enable([ $('#filters input'), $('#load') ]);
-			disable([ $('#validate'), $('#cheat'), $('#save') ]);
-			
-			initializeFromPage();
+	$('#new_game').on('click', function() {
+		if (BOARD.isInGame()) {
+			// If the user manually reset the game, signal defeat and reset.
+			BOARD.defeat();
+			resetGameControls();
 		} else {
-			BOARD.render($('#minesweeper'));
-			
 			// Start a new game.
-			$('#minesweeper').css('display', 'block');
+			initializeFromPage();
 			
-			$(this).data('isInGame', true);
-			$('#cheat').trigger('cheat.reset');
-			$('#new_game').html('Reset');
-			$('#status').html('');
+			// Clear save state.
+			if (saveState) {
+				saveState = null;
+				disable([ $('#load') ]);
+			}
 			
-			disable([ $('#filters input'), $('#load') ]);
-			enable([ $('#validate'), $('#cheat'), $('#save') ]);
+			BOARD.render($('#minesweeper'));
+			setGameControls();
 		}
 	});
 	
@@ -913,12 +977,23 @@ $(document).ready(function() {
 	});
 	
 	$('#save').on('click', function() {
-		$('#saveState').html(BOARD.save());
+		saveState = BOARD.save();
+		$('#save_state').html('<p><strong>Game saved.</strong></p><p>Copy the following code for use with the Load Data button:</p><div id="save_data">' + saveState + '</div>');
+		enable([ $('#load') ]);
 	});
 	
 	$('#load').on('click', function() {	
-		var json = prompt('Enter save data');
-		BOARD.load(json);
+		if (saveState) {
+			initializeFromPage();
+			BOARD.load(saveState);
+			BOARD.render($('#minesweeper'));
+			setGameControls();
+		}
+	});
+	
+	$('#load_data').on('click', function() {
+		saveState = prompt('Enter save data:');
+		$('#load').click();
 	});
 });
 </script>
